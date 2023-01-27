@@ -1,7 +1,7 @@
 
 # Barthez
 
-Barthez is a Rust implementation of the DNS guide from
+Barthez is a Rust implementation of the great [pi-hole](https://pi-hole.net/) inspired by this guide 
 [here](https://github.com/EmilHernvall/dnsguide/blob/master/chapter1.md).
 
 # Things to learn
