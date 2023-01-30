@@ -71,6 +71,57 @@ pub enum Record {
     },
 }
 
+impl Record {
+    /// From [RFC1035#4.1.3](https://www.rfc-editor.org/rfc/rfc1035#section-4.1.3):
+    /// ```
+    ///                                     1  1  1  1  1  1
+    ///   0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                                               |
+    /// /                                               /
+    /// /                      NAME                     /
+    /// |                                               |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                      TYPE                     |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                     CLASS                     |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                      TTL                      |
+    /// |                                               |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                   RDLENGTH                    |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--|
+    /// /                     RDATA                     /
+    /// /                                               /
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// ```
+    ///
+    ///
+    pub fn write(&self, buffer: &mut PacketBuffer) -> Result<()> {
+        match self {
+            Record::A { preamble, addr } => {
+                buffer.write_qname(&preamble.name)?;
+                buffer.write_u16(RecordType::A.into())?;
+                buffer.write_u16(1)?;
+                buffer.write_u32(preamble.ttl)?;
+
+                // Length of IP address is 4 bytes
+                buffer.write_u16(4)?;
+                let ip = addr.octets();
+                buffer.write_u8(ip[0])?;
+                buffer.write_u8(ip[1])?;
+                buffer.write_u8(ip[2])?;
+                buffer.write_u8(ip[3])?;
+            }
+            _ => {
+                println!("Skipping writing record: {}", self);
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl fmt::Display for Record {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
@@ -95,7 +146,7 @@ impl TryFrom<&mut PacketBuffer> for Record {
     type Error = Error;
 
     fn try_from(buffer: &mut PacketBuffer) -> Result<Self> {
-        let name = buffer.read_next_name()?;
+        let name = buffer.read_qname()?;
         let record_type = RecordType::from(buffer.read_u16()?);
         let _class = buffer.read_u16()?;
         let ttl = buffer.read_u32()?;

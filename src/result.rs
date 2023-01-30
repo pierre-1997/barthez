@@ -16,6 +16,13 @@ pub enum Error {
 
     /// When `read()` on a `std::io::File` fails
     FailedReadingFile,
+    // Packet write error
+    // FailedWritingBuffer(String),
+    LabelLengthOver63,
+
+    UDPBindFailed,
+    UDPSendFailed,
+    UDPRecvFailed,
 }
 
 impl fmt::Display for Error {
@@ -29,8 +36,9 @@ impl fmt::Display for Error {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum ResultCode {
+    #[default]
     NoError = 0,
     FormErr = 1,
     ServFail = 2,

@@ -1,6 +1,8 @@
 use std::fmt::{self, Formatter};
+use std::io::Write;
 
 use crate::globals::MAX_JUMPS;
+use crate::record::RecordType;
 use crate::Header;
 use crate::Question;
 use crate::Record;
@@ -14,6 +16,8 @@ pub struct PacketBuffer {
     pub bytes: [u8; 512],
     /// Current position in the bytes array
     pos: usize,
+    /// Shadowed actual bit position
+    _bit_pos: usize,
 }
 
 impl PacketBuffer {
@@ -21,6 +25,7 @@ impl PacketBuffer {
         Self {
             bytes: [0; 512],
             pos: 0,
+            _bit_pos: 0,
         }
     }
 
@@ -42,11 +47,9 @@ impl PacketBuffer {
 
     /// Gets byte `n` without consuming it
     fn get(&self, n: usize) -> Result<u8> {
-        /*
         if n >= 512 {
             return Err(Error::PacketBufferOver512(format!("get(): n = {}", n)));
         }
-        */
 
         Ok(self.bytes[n])
     }
@@ -118,7 +121,7 @@ impl PacketBuffer {
         Ok(((one as u32) << 24) | ((two as u32) << 16) | ((three as u32) << 8) | (four as u32))
     }
 
-    pub fn read_next_name(&mut self) -> Result<String> {
+    pub fn read_qname(&mut self) -> Result<String> {
         // Keep track of the number of jumps in order to cap it to `MAX_JUMPS`
         let mut jumps = 0;
         // Tells wether or not we jumped at least once
@@ -197,23 +200,169 @@ impl PacketBuffer {
 
         Ok(output)
     }
+
+    /*     WRITE    */
+    pub fn write_u8(&mut self, value: u8) -> Result<()> {
+        self.check_pos()?;
+
+        self.bytes[self.pos] = value;
+        self.pos += 1;
+
+        Ok(())
+    }
+
+    pub fn write_u16(&mut self, value: u16) -> Result<()> {
+        self.write_u8((value >> 8) as u8)?;
+        self.write_u8((value & 0xFF) as u8)?;
+
+        Ok(())
+    }
+
+    pub fn write_u32(&mut self, value: u32) -> Result<()> {
+        self.write_u8((value >> 24) as u8)?;
+        self.write_u8(((value >> 16) & 0xFF) as u8)?;
+        self.write_u8(((value >> 8) & 0xFF) as u8)?;
+        self.write_u8((value & 0xFF) as u8)?;
+
+        Ok(())
+    }
+
+    pub fn write_qname(&mut self, qname: &str) -> Result<()> {
+        // Write each part of the domain
+        for label in qname.split('.') {
+            // Double check the label length isn't over 63
+            let len = label.len();
+            if len >= 63 {
+                return Err(Error::LabelLengthOver63);
+            }
+
+            // Write label's length on 1 byte, followed by the label itself
+            self.write_u8(len as u8)?;
+            for b in label.bytes() {
+                self.write_u8(b)?;
+            }
+        }
+
+        // Write empty byte at end of qname
+        self.write_u8(0)?;
+
+        Ok(())
+    }
+
+    /*
+    pub fn _write_range(&mut self, values: &[u8]) -> Result<()> {
+        if self.pos + values.len() >= 512 {
+            return Err(Error::FailedWritingBuffer(format!(
+                "Cannot write data of len {} at {}",
+                values.len(),
+                self.pos()
+            )));
+        }
+
+        // self.bytes[self.pos..self.pos + values.len()] = values;
+
+        Ok(())
+    }
+    */
+}
+
+impl Write for PacketBuffer {
+    fn write(&mut self, buf: &[u8]) -> std::result::Result<usize, std::io::Error> {
+        for b in buf {
+            self.write_u8(*b)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        }
+
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::result::Result<(), std::io::Error> {
+        unreachable!();
+    }
 }
 
 impl From<[u8; 512]> for PacketBuffer {
     fn from(bytes: [u8; 512]) -> Self {
-        Self { bytes, pos: 0 }
+        Self {
+            bytes,
+            pos: 0,
+            _bit_pos: 0,
+        }
     }
 }
 
-pub struct DnsPacket {
-    header: Header,
+/*
+impl TryFrom<Packet> for PacketBuffer {
+    type Error = Error;
+
+    fn try_from(mut packet: Packet) -> Result<Self> {
+        let buffer = PacketBuffer::new();
+
+        // TODO: Here, define a strategy to build/convert a packet into a PacketBuffer
+        /*
+        buffer
+            .write(packet.as_bytes())
+            .map_err(|e| Error::FailedWritingBuffer(e.to_string()))?;
+        */
+
+        Ok(buffer)
+    }
+}
+*/
+
+/// From [RFCxxx]():
+/// ```
+/// +---------------------+
+/// |        Header       |
+/// +---------------------+
+/// |       Question      | the question for the name server
+/// +---------------------+
+/// |        Answer       | RRs answering the question
+/// +---------------------+
+/// |      Authority      | RRs pointing toward an authority
+/// +---------------------+
+/// |      Additional     | RRs holding additional information
+/// +---------------------+
+/// ```
+///
+#[derive(Default)]
+pub struct Packet {
+    pub header: Header,
     questions: Vec<Question>,
     answers: Vec<Record>,
     authorities: Vec<Record>,
     additionals: Vec<Record>,
 }
 
-impl TryFrom<PacketBuffer> for DnsPacket {
+impl Packet {
+    pub fn add_question(&mut self, qname: &str, qtype: RecordType) -> Result<()> {
+        self.questions.push(Question::new(qname, qtype));
+        self.header.question_count += 1;
+
+        Ok(())
+    }
+
+    pub fn write(&self, buffer: &mut PacketBuffer) -> Result<()> {
+        self.header.write(buffer)?;
+        for question in &self.questions {
+            question.write(buffer)?;
+        }
+
+        for answer in &self.answers {
+            answer.write(buffer)?;
+        }
+        for authority in &self.authorities {
+            authority.write(buffer)?;
+        }
+        for additional in &self.additionals {
+            additional.write(buffer)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl TryFrom<PacketBuffer> for Packet {
     type Error = Error;
 
     fn try_from(mut buffer: PacketBuffer) -> Result<Self> {
@@ -254,7 +403,7 @@ impl TryFrom<PacketBuffer> for DnsPacket {
     }
 }
 
-impl fmt::Display for DnsPacket {
+impl fmt::Display for Packet {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         writeln!(f, "{}", self.header)?;
 
