@@ -5,9 +5,9 @@ use crate::record::RecordType;
 use crate::result::{Error, Result};
 
 pub struct Question {
-    name: String,
+    pub name: String,
     /// 2 bytes. The record type.
-    question_type: RecordType,
+    pub question_type: RecordType,
     _class: u16,
 }
 

@@ -69,7 +69,7 @@ impl PacketBuffer {
         Ok(())
     }
 
-    fn get_range(&mut self, start: usize, len: usize) -> Result<&[u8]> {
+    pub fn get_range(&mut self, start: usize, len: usize) -> Result<&[u8]> {
         if start + len >= 512 {
             return Err(Error::PacketBufferOver512(format!(
                 "get_range(): start = {}, len = {}",
@@ -249,6 +249,25 @@ impl PacketBuffer {
         Ok(())
     }
 
+    /* SET */
+    fn set_u8(&mut self, pos: usize, value: u8) -> Result<()> {
+        if pos >= 512 {
+            return Err(Error::PacketBufferOver512(format!(
+                "Cannot set value at {}",
+                pos
+            )));
+        }
+
+        self.bytes[pos] = value;
+        Ok(())
+    }
+
+    pub fn set_u16(&mut self, pos: usize, value: u16) -> Result<()> {
+        self.set_u8(pos, ((value >> 8) & 0x00FF) as u8)?;
+        self.set_u8(pos, (value & 0x00FF) as u8)?;
+        Ok(())
+    }
+
     /*
     pub fn _write_range(&mut self, values: &[u8]) -> Result<()> {
         if self.pos + values.len() >= 512 {
@@ -328,10 +347,10 @@ impl TryFrom<Packet> for PacketBuffer {
 #[derive(Default)]
 pub struct Packet {
     pub header: Header,
-    questions: Vec<Question>,
-    answers: Vec<Record>,
-    authorities: Vec<Record>,
-    additionals: Vec<Record>,
+    pub questions: Vec<Question>,
+    pub answers: Vec<Record>,
+    pub authorities: Vec<Record>,
+    pub additionals: Vec<Record>,
 }
 
 impl Packet {

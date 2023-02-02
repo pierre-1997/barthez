@@ -4,6 +4,7 @@ mod packet;
 mod question;
 mod record;
 mod result;
+mod server;
 
 use crate::header::Header;
 use crate::packet::{Packet, PacketBuffer};
@@ -11,6 +12,7 @@ use crate::question::Question;
 use crate::record::Record;
 use crate::record::RecordType;
 use crate::result::{Error, Result};
+use crate::server::Server;
 
 use std::fs::File;
 use std::io::Read;
@@ -38,32 +40,23 @@ fn main() -> Result<()> {
 
     println!("------------------------------------");
 
-    // Forge a query packet
-    let mut send_packet: Packet = Default::default();
-    send_packet.header.recursion_desired = true;
-    send_packet.add_question("archlinux.com", RecordType::A)?;
+    let server = Server::new("0.0.0.0".to_string(), 43210);
+    let p = server.lookup("yahoo.com", RecordType::MX)?;
+    println!("{}", p);
 
-    // Write that packet to a buffer to send
-    let mut send_buffer = PacketBuffer::new();
-    send_packet.write(&mut send_buffer)?;
-    println!("Send packet:\n{}", send_packet);
+    println!("------------------------------------");
 
-    let server = ("8.8.8.8", 53);
-    let socket = UdpSocket::bind(("0.0.0.0", 43210)).map_err(|_| Error::UDPBindFailed)?;
-    socket
-        .send_to(&send_buffer.bytes[0..send_buffer.pos()], server)
-        .map_err(|e| {
-            eprintln!("{e}");
-            Error::UDPSendFailed
-        })?;
+    // Bind an UDP socket on port 2053
+    let socket = UdpSocket::bind(("0.0.0.0", 2053)).map_err(|_| Error::UDPBindFailed)?;
 
-    let mut recv_buffer = PacketBuffer::new();
-    socket
-        .recv_from(&mut recv_buffer.bytes)
-        .map_err(|_| Error::UDPRecvFailed)?;
+    println!("Running server [{:?}]", socket);
 
-    let recv_packet = Packet::try_from(recv_buffer)?;
-    println!("{}", recv_packet);
-
-    Ok(())
+    // For now, queries are handled sequentially, so an infinite loop for servicing
+    // requests is initiated.
+    loop {
+        match server.handle_query(&socket) {
+            Ok(_) => {}
+            Err(e) => eprintln!("An error occurred: {}", e),
+        }
+    }
 }

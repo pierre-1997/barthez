@@ -30,10 +30,10 @@ use crate::PacketBuffer;
 pub struct Header {
     /// A random identifier is assigned to query packets. Response packets must reply with the
     /// same id. This is needed to differentiate responses due to the stateless nature of UDP.
-    id: u16,
+    pub id: u16,
 
     /// 1 bit. 0 for queries, 1 for responses.
-    is_response: bool,
+    pub is_response: bool,
     /// 4 bits. Typically always 0, see RFC1035 for details.
     _op_code: u8,
     /// 1 bit. Set to 1 if the responding server is authoritative - that is, it "owns" - the
@@ -46,14 +46,14 @@ pub struct Header {
     /// recursively if it does not have an answer readily available.
     pub recursion_desired: bool,
     /// 1 bit. Set by the server to indicate whether or not recursive queries are allowed.
-    recursion_available: bool,
+    pub recursion_available: bool,
     /// 3 bits. Originally reserved for later use, but now used for DNSSEC queries.
     _z: u8,
 
     /// 4 bits. Set by the server to indicate the status of the response, i.e. whether or not
     /// it was successful or failed, and in the latter case providing details about the cause
     /// of the failure.
-    response_code: ResultCode,
+    pub response_code: ResultCode,
 
     /// 16 bits. The number of entries in the Question Section.
     pub question_count: u16,
@@ -68,7 +68,7 @@ pub struct Header {
 impl Default for Header {
     fn default() -> Self {
         Self {
-            id: 6666,
+            id: 0,
             is_response: false,
             _op_code: 0,
             is_authoritative: false,
