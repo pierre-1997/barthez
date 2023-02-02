@@ -1,5 +1,6 @@
 use std::fmt::{self, Formatter};
 use std::io::Write;
+use std::net::Ipv4Addr;
 
 use crate::globals::MAX_JUMPS;
 use crate::record::RecordType;
@@ -359,6 +360,43 @@ impl Packet {
         self.header.question_count += 1;
 
         Ok(())
+    }
+
+    pub fn get_random_a(&self) -> Option<Ipv4Addr> {
+        self.answers.iter().find_map(|record| match record {
+            Record::A { addr, .. } => Some(*addr),
+            _ => None,
+        })
+    }
+
+    fn match_ns<'a>(&'a self, qname: &'a str) -> impl Iterator<Item = (&'a str, &'a str)> {
+        self.authorities.iter().filter_map(|record| match record {
+            Record::NS { preamble, host } => {
+                if qname.ends_with(&preamble.name) {
+                    Some((preamble.name.as_str(), host.as_str()))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+    }
+
+    pub fn get_resolved_ns(&self, qname: &str) -> Option<Ipv4Addr> {
+        self.match_ns(qname)
+            .flat_map(|(_, host)| {
+                self.additionals
+                    .iter()
+                    .filter_map(move |record| match record {
+                        Record::A { preamble, addr, .. } if preamble.name == host => Some(*addr),
+                        _ => None,
+                    })
+            })
+            .next()
+    }
+
+    pub fn get_unresolved_ns<'a>(&'a self, qname: &'a str) -> Option<&str> {
+        self.match_ns(qname).map(|(_, host)| host).next()
     }
 
     pub fn write(&self, buffer: &mut PacketBuffer) -> Result<()> {

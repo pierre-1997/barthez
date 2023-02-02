@@ -3,14 +3,12 @@ use crate::record::RecordType;
 use crate::result::{Error, Result, ResultCode};
 
 use std::fmt::{self, Formatter};
+use std::net::Ipv4Addr;
 use std::net::UdpSocket;
 
 pub struct Server {
     local_addr: String,
     local_port: u16,
-
-    remote_addr: String,
-    remote_port: u16,
 }
 
 impl Server {
@@ -18,12 +16,15 @@ impl Server {
         Self {
             local_addr: addr,
             local_port: port,
-            remote_addr: "9.9.9.9".to_string(),
-            remote_port: 53,
         }
     }
 
-    pub fn lookup(&self, qname: &str, qtype: RecordType) -> Result<Packet> {
+    pub fn lookup(
+        &self,
+        qname: &str,
+        qtype: RecordType,
+        server: (Ipv4Addr, u16),
+    ) -> Result<Packet> {
         // Forge a query packet
         let mut send_packet: Packet = Default::default();
         send_packet.header.recursion_desired = true;
@@ -33,7 +34,6 @@ impl Server {
         let mut send_buffer = PacketBuffer::new();
         send_packet.write(&mut send_buffer)?;
 
-        let server = (self.remote_addr.to_owned(), self.remote_port);
         let socket = UdpSocket::bind((self.local_addr.to_owned(), self.local_port))
             .map_err(|_| Error::UDPBindFailed)?;
         socket
@@ -86,7 +86,7 @@ impl Server {
             // fail, in which case the `SERVFAIL` response code is set to indicate
             // as much to the client. If rather everything goes as planned, the
             // question and response records as copied into our response packet.
-            if let Ok(result) = self.lookup(&question.name, question.question_type) {
+            if let Ok(result) = self.recursive_lookup(&question.name, question.question_type) {
                 println!("Result: {}", result);
 
                 packet.questions.push(question);
@@ -128,6 +128,63 @@ impl Server {
             .map_err(|_| Error::UDPSendFailed)?;
 
         Ok(())
+    }
+
+    pub fn recursive_lookup(&self, qname: &str, qtype: RecordType) -> Result<Packet> {
+        // For now we're always starting with *a.root-servers.net*.
+        let mut ns = "198.41.0.4".parse::<Ipv4Addr>().unwrap();
+
+        // Since it might take an arbitrary number of steps, we enter an unbounded loop.
+        loop {
+            println!("attempting lookup of {:?} {} with ns {}", qtype, qname, ns);
+
+            // The next step is to send the query to the active server.
+            let ns_copy = ns;
+
+            let server = (ns_copy, 53);
+            let response = self.lookup(qname, qtype, server)?;
+
+            // If there are entries in the answer section, and no errors, we are done!
+            if !response.answers.is_empty() && response.header.response_code == ResultCode::NoError
+            {
+                return Ok(response);
+            }
+
+            // We might also get a `NXDOMAIN` reply, which is the authoritative name servers
+            // way of telling us that the name doesn't exist.
+            if response.header.response_code == ResultCode::NXDomain {
+                return Ok(response);
+            }
+
+            // Otherwise, we'll try to find a new nameserver based on NS and a corresponding A
+            // record in the additional section. If this succeeds, we can switch name server
+            // and retry the loop.
+            if let Some(new_ns) = response.get_resolved_ns(qname) {
+                ns = new_ns;
+
+                continue;
+            }
+
+            // If not, we'll have to resolve the ip of a NS record. If no NS records exist,
+            // we'll go with what the last server told us.
+            let new_ns_name = match response.get_unresolved_ns(qname) {
+                Some(x) => x,
+                None => return Ok(response),
+            };
+
+            // Here we go down the rabbit hole by starting _another_ lookup sequence in the
+            // midst of our current one. Hopefully, this will give us the IP of an appropriate
+            // name server.
+            let recursive_response = self.recursive_lookup(&new_ns_name, RecordType::A)?;
+
+            // Finally, we pick a random ip from the result, and restart the loop. If no such
+            // record is available, we again return the last result we got.
+            if let Some(new_ns) = recursive_response.get_random_a() {
+                ns = new_ns;
+            } else {
+                return Ok(response);
+            }
+        }
     }
 }
 

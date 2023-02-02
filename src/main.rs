@@ -41,7 +41,7 @@ fn main() -> Result<()> {
     println!("------------------------------------");
 
     let server = Server::new("0.0.0.0".to_string(), 43210);
-    let p = server.lookup("yahoo.com", RecordType::MX)?;
+    let p = server.recursive_lookup("yahoo.com", RecordType::MX)?;
     println!("{}", p);
 
     println!("------------------------------------");

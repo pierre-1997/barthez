@@ -62,7 +62,7 @@ impl fmt::Display for RecordType {
 }
 
 pub struct RecordPreamble {
-    name: String,
+    pub name: String,
     /// 2 bytes
     record_type: RecordType,
     /// 2 bytes. The class, in practice always set to 1.
